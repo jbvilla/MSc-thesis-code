@@ -1,0 +1,186 @@
+import datetime
+import os
+import wandb
+import concurrent.futures
+import subprocess
+
+import numpy as np
+from cmaes import CMA
+from tqdm import tqdm
+
+from src.flying_squirrel.experiements.shared.interpolation import interpolate_params, get_time_points, \
+    prepare_control_points
+from src.flying_squirrel.experiements.shared.wandb_utils import create_generation_end_location_heatmap, get_metrics, \
+    create_spline_plots
+from src.flying_squirrel.experiements.flying_squirrel_environment_builder import get_flying_squirrel_environment
+from src.utils.load_write import get_result_directory, write_pdf_with_url, save_dict_data_to_csv, \
+    write_result
+from src.flying_squirrel.experiements.shared.evaluate import evaluate_params, FitnessFunction
+
+
+def run_cma_es(num_generations: int, start_vel: list, euler_flying_squirrel: list,
+               result_directory: str,
+               population_size: int = 100,
+               fitness_function: FitnessFunction = FitnessFunction.X_DISTANCE, simplified: bool = True):
+    num_generations = num_generations
+    # The control_points that will change because of the CMA-ES
+    number_parametric_control_points_spline = 3
+
+    size_area = (10, 10)
+    start_pos = [0, 0, 20]
+
+    def get_env():
+        return get_flying_squirrel_environment(
+            size_arena=size_area,
+            simulation_time=10,
+            position_flying_squirrel=start_pos,
+            euler_flying_squirrel=euler_flying_squirrel
+        )
+
+    env, env_config = get_env()
+
+    # Number of steps to simulate (+ 1 because sometimes the env does an extra step)
+    number_of_steps = env_config.total_num_control_steps + 1
+
+    if simplified:
+        # Simplified number of joints
+        # -12 because limbs are mirrored so only half of the joints are generated
+        number_of_joints = env.action_space.shape[0] - 12
+
+        # Lower and higher bound for every control point
+        low = np.concatenate([env.action_space.low[:6], env.action_space.low[12:18], env.action_space.low[24:]])
+        high = np.concatenate([env.action_space.high[:6], env.action_space.high[12:18], env.action_space.high[24:]])
+        lower_bound = np.tile(low, number_parametric_control_points_spline)
+        higher_bound = np.tile(high, number_parametric_control_points_spline)
+    else:
+        # Not simplified number of joints
+        number_of_joints = env.action_space.shape[0]
+        # Lower and higher bound for every control point
+        lower_bound = np.tile(env.action_space.low, number_parametric_control_points_spline)
+        higher_bound = np.tile(env.action_space.high, number_parametric_control_points_spline)
+
+    bounds = np.column_stack((lower_bound, higher_bound))
+
+    optimizer = CMA(mean=np.zeros(number_of_joints * number_parametric_control_points_spline),
+                    sigma=0.5,
+                    bounds=bounds,
+                    population_size=population_size,
+                    )
+
+    current_best = None
+    current_best_fitness = np.inf
+    current_best_distance = np.inf
+    current_best_height = 0
+
+    for generation in tqdm(range(num_generations), desc="Generations"):
+        solutions = []
+        end_locations = []
+        fitness_values = []
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            futures = {}
+            for _ in tqdm(range(optimizer.population_size), desc=f"Gen {generation + 1}", leave=False):
+                params = optimizer.ask()
+                env, _ = get_env()
+                future = executor.submit(evaluate_params, params, number_of_steps, number_of_joints,
+                                         number_parametric_control_points_spline, env, fitness_function, start_vel, simplified)
+                futures[future] = params
+
+            for future in concurrent.futures.as_completed(futures):
+                fitness, end_pos = future.result()
+                params = futures[future]
+                solutions.append((params, fitness))
+                end_locations.append(end_pos[:2])
+                fitness_values.append(fitness)
+                if fitness < current_best_fitness:
+                    current_best = params
+                    current_best_fitness = fitness
+                    current_best_distance = np.linalg.norm(end_pos[:2] - start_pos[:2])
+                    current_best_height = end_pos[2]
+
+        # Update the optimizer with the solutions
+        optimizer.tell(solutions)
+        best_fitness = min(s[1] for s in solutions)
+        # -best_fitness so it is again positive
+        print(f"Generation {generation + 1}, best fitness: {-best_fitness}")
+
+        # Log the metrics to wandb
+        dictionary = get_metrics(fitness_values)
+        dictionary["best_params_distance"] = current_best_distance
+        dictionary["best_params_height"] = current_best_height
+
+        wandb.log(data=dictionary, step=generation)
+        dictionary["generation"] = generation
+        save_dict_data_to_csv(dictionary, "numeric_data", result_directory)
+
+        if generation % 10 == 0 or generation == num_generations - 1:
+            interpolated_params = interpolate_params(current_best, number_of_steps, number_of_joints,
+                                                     number_parametric_control_points_spline, simplified)
+            write_result(
+                current_best=interpolated_params,
+                result_directory=result_directory,
+                generation=generation
+            )
+
+            heatmap = create_generation_end_location_heatmap(end_locations, generation, size_area, result_directory)
+            wandb.log({"heatmap": wandb.Image(heatmap)}, step=generation)
+
+        if generation % 100 == 0 or generation == num_generations - 1:
+            interpolated_params = interpolate_params(current_best, number_of_steps, number_of_joints,
+                                                     number_parametric_control_points_spline, simplified)
+
+            control_points = prepare_control_points(current_best, number_of_joints, number_parametric_control_points_spline)
+
+            # number_parametric_control_points_spline + 1 because we add control point 0 at the start
+            create_spline_plots(interpolated_params,
+                                control_points,
+                                get_time_points(number_of_steps, number_parametric_control_points_spline + 1), generation,
+                                env.actuators, simplified, result_directory)
+
+            # Does not work on the HPC because of the display variable
+            vsc_data_path = os.environ.get('VSC_DATA')
+            # if not vsc_data_path:
+            #     create_video(env, env_config, interpolated_params, start_vel, generation)
+
+    env.close()
+
+
+if __name__ == "__main__":
+    """
+    This script runs the CMA-ES algorithm to optimize the parameters for the flying squirrel.
+    """
+
+    num_gen = 800
+    population_size = 32
+    start_vel = [0, 0, 0]
+    euler_flying_squirrel = [0, np.pi / 4, 0]
+    fitness_function = FitnessFunction.X_DISTANCE
+
+    timestamp = datetime.datetime.now().strftime("%Y_%m_%d_%Hh%Mm%Ss")
+
+    experiment_run_name = f"CMA-ES_{timestamp}_gen_{num_gen}_start_vel_{'_'.join(map(str, start_vel))}_popsize_{population_size}_{fitness_function.name}"
+
+    # Initialize wandb
+    wandb.init(project="Masterproef", group="CMA-ES", name=experiment_run_name)
+
+    commit_number = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"]).strip().decode("utf-8")
+    wandb.run.notes = f"Commit: {commit_number}"
+    wandb.run.summary["commit_number"] = commit_number
+
+    result_directory = get_result_directory("cma-es", experiment_run_name, os.path.dirname(os.path.abspath(__file__)))
+
+    # Create the directory if it does not exist
+    os.makedirs(result_directory, exist_ok=True)
+
+    # Write pdf with url and run name
+    write_pdf_with_url(experiment_run_name, wandb.run.get_url(), result_directory)
+
+    run_cma_es(
+        num_generations=num_gen,
+        start_vel=start_vel,
+        euler_flying_squirrel=euler_flying_squirrel,
+        result_directory=result_directory,
+        population_size=population_size,
+        fitness_function=fitness_function
+    )
+
+    wandb.finish()

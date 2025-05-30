@@ -1,0 +1,14 @@
+.idea
+__pycache__
+
+# genereted files
+*.xml
+*.mp4
+*.avi
+*.webm
+
+# Script to run the Mujoco simulation executable on the generated XML file
+simulateKite.sh
+
+# wandb files
+wandb
