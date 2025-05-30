@@ -1,3 +1,8 @@
+"""
+Important if you change the default values for the flexcomp model:
+- Make sure to remove the temp folder located at src/flying_squirrel/3D_models/temp (mesh for the flexcomp is cached there)
+"""
+
 import numpy as np
 
 from src.flying_squirrel.mjcf.morphology.specification.specification import FlyingSquirrelMorphologySpecification, \

@@ -91,15 +91,9 @@ class MJCFFlyingSquirrelPatagium(MJCFMorphologyPart):
 
     def _build_soft_tissue(self, corner_points: np.ndarray, subdivisions_count: int) -> None:
 
-        # Create the mesh if it does not already exist (for multiple experiments on the same time)
-        # if not os.path.exists(self._patagium_path):
-        #    self._create_mesh(corner_points, subdivisions_count)
-
-        # Wait short time to make sure the file is created before it is used
-        # otherwise it will error on the HPC
-        time.sleep(0.5)
-
-        self._create_mesh(corner_points, subdivisions_count)
+        # Create the mesh if it does not already exist (for multiple experiments on the same time or parallel)
+        if not os.path.exists(self._patagium_path):
+            self._create_mesh(corner_points, subdivisions_count)
 
         # Because the inertiabox starts at every vertex, so we need to divide by 2 (take the max distance, because
         # otherwise there will be a lot of holes in the whole inertiabox of the patagium)
