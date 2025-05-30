@@ -52,7 +52,6 @@ def get_flying_squirrel_environment(
         simulation_time=simulation_time,
         num_physics_steps_per_control_step=num_physics_steps_per_control_step,
         time_scale=1,
-        # camera_ids=[0, 1],
         camera_ids=camera_ids,
         render_size=(480 * 4, 640 * 4),
         attach_target=attach_target,

@@ -263,6 +263,15 @@ class FlightPath:
             spacing: float = 0.25,
             turn_distance_from_center: float = 2.0
     ):
+        """
+        Initialize the flight path with the given parameters.
+        :param mode: The flight path mode (NORMAL, LEFT_TURN, RIGHT_TURN).
+        :param start_pos: Start position of the flying squirrel in 3D space.
+        :param end_pos: End position of the flying squirrel in 3D space.
+        :param stable_glide_angle_alpha: Angle of stable glide in degrees.
+        :param spacing: Spacing between points for interpolation.
+        :param turn_distance_from_center: Distance from the center for turns.
+        """
         self.mode = mode
         self.start_pos = start_pos
         self.end_pos = end_pos
@@ -276,6 +285,9 @@ class FlightPath:
             self.interpolated_path = self.get_interpolate_path(spacing, 'quadratic')
 
     def _get_path(self):
+        """
+        Get the main flight path points based on the flight mode.
+        """
 
         if self.mode == FlightPathModes.NORMAL:
             end_pos_free_fall_phase = np.array([
@@ -329,6 +341,9 @@ class FlightPath:
             ])
 
     def get_interpolate_path(self, spacing, type_of_interpolation='linear'):
+        """
+        Interpolate the flight path points.
+        """
         # Calculate cumulative distances between points
         distances = np.sqrt(np.sum(np.diff(self.path, axis=0) ** 2, axis=1))
         cumulative_distances = np.insert(np.cumsum(distances), 0, 0)
@@ -343,10 +358,12 @@ class FlightPath:
         return np.stack(interpolated_points, axis=1)
 
     def plot_path_xz(self):
+        """
+        Plot the flight path in the xz-plane.
+        """
         x_values = self.path[:, 0]
         z_values = self.path[:, 2]
 
-        # Maak de plot
         plt.figure(figsize=(8, 6))
         plt.plot(x_values, z_values, marker='o', linestyle='-', color='b', label='hoogte over x afstand')
         plt.xlabel('Afstand x (m)')
@@ -356,6 +373,9 @@ class FlightPath:
         plt.savefig('flight_path_plot.png')
 
     def plot_path_xy(self, spacing=None):
+        """
+        Plot the flight path in the xy-plane.
+        """
         if spacing is None:
             x_values = self.path[:, 0]
             y_values = self.path[:, 1]
@@ -364,7 +384,6 @@ class FlightPath:
             x_values = interpolated_path[:, 0]
             y_values = interpolated_path[:, 1]
 
-        # Maak de plot
         plt.figure(figsize=(8, 6))
         plt.plot(x_values, y_values, marker='o', linestyle='-', color='b', label='y afstand over x afstand')
         plt.xlabel('Afstand x (m)')

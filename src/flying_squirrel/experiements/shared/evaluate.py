@@ -36,7 +36,6 @@ def _fitness_function(
     LOWER FITNESS IS BETTER for this fitness function
 
     Fitness function to evaluate the parameters
-    :param option: Option to evaluate the fitness function
     :param start_pos: Start position
     :param end_pos: End position
     :param heights: Heights of the squirrel
@@ -45,6 +44,8 @@ def _fitness_function(
     :param flight_path_with_phases: Flight path object for flight path experiment with phases
     :param positions: Position of the squirrel
     :param flight_path: Flight path object for flight path experiment without phases
+    :param is_upside_down: Whether the squirrel is upside down
+    :param option: Option to evaluate the fitness function
     :return: Fitness of the parameters
     """
     if option == FitnessFunction.DISTANCE:
